@@ -112,7 +112,7 @@ class MainActivity : ComponentActivity() {
 
         return result
     }
-
+@OptIn(ExperimentalMaterial3Api::class)
     @Composable
     private fun AkilliGaleriApp() {
 
