@@ -1,24 +1,25 @@
 package com.ediptan01.akilligaleri
 
 import android.Manifest
+import android.app.RecoverableSecurityException
 import android.content.ContentUris
+import android.content.ContentValues
+import android.content.IntentSender
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
-import android.util.Size
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.compose.setContent
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
+import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,142 +27,432 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.CleaningServices
-import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Screenshot
-import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import java.util.Locale
 
 data class PhotoItem(
     val id: Long,
     val name: String,
-    val uri: android.net.Uri,
-    val category: String,
-    val sizeBytes: Long
+    val uri: Uri,
+    val category: String
 )
 
 class MainActivity : ComponentActivity() {
+
+    private var pendingDelete: List<Uri> = emptyList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         setContent {
-            MaterialTheme {
-                AkilliGaleriApp()
+            AkilliGaleriApp()
+        }
+    }
+
+    @Composable
+    fun AkilliGaleriApp() {
+
+        var photos by remember { mutableStateOf(emptyList<PhotoItem>()) }
+        var selected by remember { mutableStateOf(setOf<Long>()) }
+        var category by remember { mutableStateOf("Tümü") }
+
+        val permissionLauncher =
+            rememberLauncherForActivityResult(
+                ActivityResultContracts.RequestMultiplePermissions()
+            ) {
+                photos = loadPhotos()
+            }
+
+        val deleteLauncher =
+            rememberLauncherForActivityResult(
+                ActivityResultContracts.StartIntentSenderForResult()
+            ) {
+                selected = emptySet()
+                photos = loadPhotos()
+            }
+
+        fun scan() {
+            val permissions =
+                if (Build.VERSION.SDK_INT >= 33) {
+                    arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
+                } else {
+                    arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+                }
+
+            val granted = permissions.all {
+                ContextCompat.checkSelfPermission(
+                    this,
+                    it
+                ) == PackageManager.PERMISSION_GRANTED
+            }
+
+            if (granted) {
+                photos = loadPhotos()
+            } else {
+                permissionLauncher.launch(permissions)
+            }
+        }
+
+        LaunchedEffect(Unit) {
+            scan()
+        }
+
+        val filtered = when (category) {
+            "Ekran görüntüleri" ->
+                photos.filter { it.category == "Ekran görüntüsü" }
+
+            "WhatsApp" ->
+                photos.filter { it.category == "WhatsApp" }
+
+            "Telegram" ->
+                photos.filter { it.category == "Telegram" }
+
+            else -> photos
+        }
+
+        MaterialTheme {
+
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = Color(0xFFF8F6FA)
+            ) {
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(18.dp)
+                ) {
+
+                    Text(
+                        text = "Akıllı Galeri",
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Spacer(Modifier.height(6.dp))
+
+                    Text(
+                        text = "Yapay zekâ destekli galeri temizleme",
+                        fontSize = 16.sp,
+                        color = Color.Gray
+                    )
+
+                    Spacer(Modifier.height(18.dp))
+
+                    Button(
+                        onClick = { scan() },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(18.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = null
+                        )
+
+                        Spacer(Modifier.size(8.dp))
+
+                        Text("Galeriyi yeniden tara")
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(24.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = Color(0xFFE9E4EB)
+                        )
+                    ) {
+
+                        Column(
+                            modifier = Modifier.padding(20.dp)
+                        ) {
+
+                            Text(
+                                "Galeri analizi",
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+
+                            Spacer(Modifier.height(12.dp))
+
+                            Text(
+                                "Toplam fotoğraf: ${photos.size}",
+                                fontSize = 18.sp
+                            )
+
+                            Text(
+                                "Ekran görüntüsü: ${
+                                    photos.count {
+                                        it.category == "Ekran görüntüsü"
+                                    }
+                                }",
+                                fontSize = 18.sp
+                            )
+
+                            Text(
+                                "WhatsApp: ${
+                                    photos.count {
+                                        it.category == "WhatsApp"
+                                    }
+                                }",
+                                fontSize = 18.sp
+                            )
+
+                            Text(
+                                "Telegram: ${
+                                    photos.count {
+                                        it.category == "Telegram"
+                                    }
+                                }",
+                                fontSize = 18.sp
+                            )
+
+                            Spacer(Modifier.height(10.dp))
+
+                            Text(
+                                "Fotoğraflarınız izniniz olmadan silinmez.",
+                                color = Color.Gray
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(14.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+
+                        FilterChip(
+                            selected = category == "Tümü",
+                            onClick = { category = "Tümü" },
+                            label = { Text("Tümü") }
+                        )
+
+                        FilterChip(
+                            selected = category == "Ekran görüntüleri",
+                            onClick = {
+                                category = "Ekran görüntüleri"
+                            },
+                            label = {
+                                Text("Ekran görüntüleri")
+                            }
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+
+                        FilterChip(
+                            selected = category == "WhatsApp",
+                            onClick = {
+                                category = "WhatsApp"
+                            },
+                            label = { Text("WhatsApp") }
+                        )
+
+                        FilterChip(
+                            selected = category == "Telegram",
+                            onClick = {
+                                category = "Telegram"
+                            },
+                            label = { Text("Telegram") }
+                        )
+                    }
+
+                    Spacer(Modifier.height(10.dp))
+
+                    if (selected.isNotEmpty()) {
+
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(18.dp)
+                        ) {
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement =
+                                    Arrangement.SpaceBetween
+                            ) {
+
+                                Text(
+                                    "${selected.size} fotoğraf seçildi",
+                                    fontWeight = FontWeight.Bold
+                                )
+
+                                Button(
+                                    onClick = {
+
+                                        val deleteList =
+                                            photos.filter {
+                                                selected.contains(it.id)
+                                            }
+
+                                        requestDelete(
+                                            deleteList.map { it.uri },
+                                            deleteLauncher
+                                        )
+                                    }
+                                ) {
+
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = null
+                                    )
+
+                                    Spacer(Modifier.size(5.dp))
+
+                                    Text("Sil")
+                                }
+                            }
+                        }
+
+                        Spacer(Modifier.height(8.dp))
+                    }
+
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement =
+                            Arrangement.spacedBy(8.dp)
+                    ) {
+
+                        items(
+                            filtered,
+                            key = { it.id }
+                        ) { photo ->
+
+                            PhotoCard(
+                                photo = photo,
+                                selected =
+                                    selected.contains(photo.id),
+                                onClick = {
+
+                                    selected =
+                                        if (selected.contains(photo.id)) {
+                                            selected - photo.id
+                                        } else {
+                                            selected + photo.id
+                                        }
+                                }
+                            )
+                        }
+                    }
+                }
             }
         }
     }
 
-    private fun readPhotos(): List<PhotoItem> {
+    private fun loadPhotos(): List<PhotoItem> {
+
         val result = mutableListOf<PhotoItem>()
+
+        val collection =
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI
 
         val projection = arrayOf(
             MediaStore.Images.Media._ID,
             MediaStore.Images.Media.DISPLAY_NAME,
-            MediaStore.Images.Media.RELATIVE_PATH,
-            MediaStore.Images.Media.SIZE
+            MediaStore.Images.Media.DATA
         )
 
+        val sort =
+            "${MediaStore.Images.Media.DATE_ADDED} DESC"
+
         contentResolver.query(
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            collection,
             projection,
             null,
             null,
-            MediaStore.Images.Media.DATE_ADDED + " DESC"
+            sort
         )?.use { cursor ->
 
             val idColumn =
-                cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                cursor.getColumnIndexOrThrow(
+                    MediaStore.Images.Media._ID
+                )
 
             val nameColumn =
-                cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
+                cursor.getColumnIndexOrThrow(
+                    MediaStore.Images.Media.DISPLAY_NAME
+                )
 
-            val pathColumn =
-                cursor.getColumnIndexOrThrow(MediaStore.Images.Media.RELATIVE_PATH)
-
-            val sizeColumn =
-                cursor.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE)
+            val dataColumn =
+                cursor.getColumnIndex(
+                    MediaStore.Images.Media.DATA
+                )
 
             while (cursor.moveToNext()) {
 
                 val id = cursor.getLong(idColumn)
-                val name = cursor.getString(nameColumn) ?: ""
-                val path = cursor.getString(pathColumn) ?: ""
-                val size = cursor.getLong(sizeColumn)
 
-                val uri = ContentUris.withAppendedId(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    id
-                )
+                val name =
+                    cursor.getString(nameColumn) ?: "Fotoğraf"
 
-                val searchText =
-                    (name + " " + path).lowercase(Locale.getDefault())
+                val path =
+                    if (dataColumn >= 0)
+                        cursor.getString(dataColumn)
+                    else
+                        ""
 
-                val category = when {
+                val lower =
+                    (name + " " + path).lowercase()
 
-                    searchText.contains("screenshot") ||
-                    searchText.contains("screen_shot") ||
-                    searchText.contains("ekran") ->
-                        "Ekran görüntüsü"
+                val category =
+                    when {
+                        lower.contains("screenshot") ||
+                        lower.contains("screen_shot") ||
+                        lower.contains("ekran görüntüsü") ||
+                        lower.contains("screenshots") ->
+                            "Ekran görüntüsü"
 
-                    searchText.contains("whatsapp") ->
-                        "WhatsApp"
+                        lower.contains("whatsapp") ->
+                            "WhatsApp"
 
-                    searchText.contains("telegram") ->
-                        "Telegram"
+                        lower.contains("telegram") ->
+                            "Telegram"
 
-                    else ->
-                        "Fotoğraflar"
-                }
+                        else ->
+                            "Fotoğraf"
+                    }
 
                 result.add(
                     PhotoItem(
                         id = id,
                         name = name,
-                        uri = uri,
-                        category = category,
-                        sizeBytes = size
+                        uri = ContentUris.withAppendedId(
+                            collection,
+                            id
+                        ),
+                        category = category
                     )
                 )
             }
@@ -170,590 +461,120 @@ class MainActivity : ComponentActivity() {
         return result
     }
 
-    @OptIn(ExperimentalMaterial3Api::class)
-    @Composable
-    private fun AkilliGaleriApp() {
+    private fun requestDelete(
+        uris: List<Uri>,
+        launcher:
+        androidx.activity.result.ActivityResultLauncher<
+            IntentSenderRequest
+            >
+    ) {
 
-        var photos by remember {
-            mutableStateOf(emptyList<PhotoItem>())
-        }
+        if (uris.isEmpty()) return
 
-        var scanned by remember {
-            mutableStateOf(false)
-        }
+        if (Build.VERSION.SDK_INT >= 30) {
 
-        var selectedCategory by remember {
-            mutableStateOf("Tümü")
-        }
-
-        var isScanning by remember {
-            mutableStateOf(false)
-        }
-
-        val permission =
-            if (Build.VERSION.SDK_INT >= 33) {
-                Manifest.permission.READ_MEDIA_IMAGES
-            } else {
-                Manifest.permission.READ_EXTERNAL_STORAGE
-            }
-
-        val permissionLauncher =
-            rememberLauncherForActivityResult(
-                ActivityResultContracts.RequestPermission()
-            ) { granted ->
-
-                if (granted) {
-                    photos = readPhotos()
-                    scanned = true
-                }
-            }
-
-        fun scanGallery() {
-
-            val granted =
-                ContextCompat.checkSelfPermission(
-                    this@MainActivity,
-                    permission
-                ) == PackageManager.PERMISSION_GRANTED
-
-            if (!granted) {
-                permissionLauncher.launch(permission)
-                return
-            }
-
-            isScanning = true
-
-            photos = readPhotos()
-
-            scanned = true
-
-            isScanning = false
-        }
-
-        Scaffold(
-
-            containerColor =
-                MaterialTheme.colorScheme.background,
-
-            topBar = {
-
-                TopAppBar(
-
-                    title = {
-
-                        Column {
-
-                            Text(
-                                "Akıllı Galeri",
-                                fontWeight = FontWeight.Bold
-                            )
-
-                            Text(
-                                "Galerini akıllıca düzenle",
-                                fontSize = 12.sp,
-                                color =
-                                    MaterialTheme.colorScheme
-                                        .onSurfaceVariant
-                            )
-                        }
-                    },
-
-                    actions = {
-
-                        IconButton(
-                            onClick = {
-                                scanGallery()
-                            }
-                        ) {
-
-                            Icon(
-                                Icons.Default.Refresh,
-                                contentDescription = "Yenile"
-                            )
-                        }
-                    },
-
-                    colors =
-                        TopAppBarDefaults.topAppBarColors(
-                            containerColor =
-                                MaterialTheme.colorScheme.background
-                        )
-                )
-            }
-
-        ) { padding ->
-
-            if (!scanned) {
-
-                WelcomeScreen(
-                    padding = padding,
-                    onScan = {
-                        scanGallery()
-                    }
+            val request =
+                MediaStore.createDeleteRequest(
+                    contentResolver,
+                    uris
                 )
 
-            } else {
+            launcher.launch(
+                IntentSenderRequest.Builder(
+                    request.intentSender
+                ).build()
+            )
 
-                GalleryDashboard(
-                    padding = padding,
-                    photos = photos,
-                    selectedCategory = selectedCategory,
-                    onCategorySelected = {
-                        selectedCategory = it
-                    },
-                    onScan = {
-                        scanGallery()
-                    },
-                    isScanning = isScanning
+        } else {
+
+            uris.forEach { uri ->
+                contentResolver.delete(
+                    uri,
+                    null,
+                    null
                 )
             }
         }
     }
 
     @Composable
-    private fun WelcomeScreen(
-        padding: PaddingValues,
-        onScan: () -> Unit
+    private fun PhotoCard(
+        photo: PhotoItem,
+        selected: Boolean,
+        onClick: () -> Unit
     ) {
 
-        Column(
-
+        Card(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 20.dp),
-
-            horizontalAlignment =
-                Alignment.CenterHorizontally
-
+                .fillMaxWidth()
+                .clickable { onClick() },
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(
+                containerColor =
+                    if (selected)
+                        Color(0xFFDCD0F2)
+                    else
+                        Color.White
+            )
         ) {
 
-            Spacer(
-                Modifier.height(48.dp)
-            )
-
-            Surface(
-
-                modifier =
-                    Modifier.size(92.dp),
-
-                shape =
-                    RoundedCornerShape(28.dp),
-
-                color =
-                    MaterialTheme.colorScheme
-                        .primaryContainer
-
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(15.dp),
+                verticalAlignment =
+                    Alignment.CenterVertically
             ) {
 
                 Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .background(
+                            Color(0xFFE8E1EE),
+                            RoundedCornerShape(14.dp)
+                        ),
                     contentAlignment =
                         Alignment.Center
                 ) {
 
                     Icon(
-
-                        Icons.Default.AutoAwesome,
-
+                        imageVector =
+                            if (photo.category ==
+                                "Ekran görüntüsü")
+                                Icons.Default.Screenshot
+                            else
+                                Icons.Default.Image,
                         contentDescription = null,
-
-                        modifier =
-                            Modifier.size(46.dp),
-
-                        tint =
-                            MaterialTheme.colorScheme.primary
+                        modifier = Modifier.size(28.dp)
                     )
                 }
-            }
 
-            Spacer(
-                Modifier.height(24.dp)
-            )
+                Spacer(Modifier.size(14.dp))
 
-            Text(
-
-                "Galerini\nakıllıca temizle.",
-
-                style =
-                    MaterialTheme.typography.headlineLarge,
-
-                fontWeight =
-                    FontWeight.Bold
-            )
-
-            Spacer(
-                Modifier.height(12.dp)
-            )
-
-            Text(
-
-                "Ekran görüntülerini, WhatsApp fotoğraflarını ve diğer görselleri tek ekranda keşfet.",
-
-                style =
-                    MaterialTheme.typography.bodyLarge,
-
-                color =
-                    MaterialTheme.colorScheme
-                        .onSurfaceVariant
-            )
-
-            Spacer(
-                Modifier.height(28.dp)
-            )
-
-            Button(
-
-                onClick = onScan,
-
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-
-                shape =
-                    RoundedCornerShape(18.dp)
-
-            ) {
-
-                Icon(
-                    Icons.Default.PhotoLibrary,
-                    contentDescription = null
-                )
-
-                Spacer(
-                    Modifier.width(10.dp)
-                )
-
-                Text(
-                    "Galeriyi taramaya başla",
-                    fontWeight =
-                        FontWeight.Bold
-                )
-            }
-
-            Spacer(
-                Modifier.height(18.dp)
-            )
-
-            Text(
-
-                "Fotoğraflarınız izniniz olmadan silinmez.",
-
-                color =
-                    MaterialTheme.colorScheme
-                        .onSurfaceVariant,
-
-                fontSize = 13.sp
-            )
-        }
-    }
-
-    @Composable
-    private fun GalleryDashboard(
-
-        padding: PaddingValues,
-
-        photos: List<PhotoItem>,
-
-        selectedCategory: String,
-
-        onCategorySelected:
-            (String) -> Unit,
-
-        onScan: () -> Unit,
-
-        isScanning: Boolean
-
-    ) {
-
-        val screenshots =
-            photos.count {
-                it.category ==
-                    "Ekran görüntüsü"
-            }
-
-        val whatsapp =
-            photos.count {
-                it.category ==
-                    "WhatsApp"
-            }
-
-        val telegram =
-            photos.count {
-                it.category ==
-                    "Telegram"
-            }
-
-        val screenshotSize =
-            photos
-                .filter {
-                    it.category ==
-                        "Ekran görüntüsü"
-                }
-                .sumOf {
-                    it.sizeBytes
-                }
-
-        val whatsappSize =
-            photos
-                .filter {
-                    it.category ==
-                        "WhatsApp"
-                }
-                .sumOf {
-                    it.sizeBytes
-                }
-
-        val visiblePhotos =
-            when (selectedCategory) {
-
-                "Ekran görüntüsü" ->
-                    photos.filter {
-                        it.category ==
-                            "Ekran görüntüsü"
-                    }
-
-                "WhatsApp" ->
-                    photos.filter {
-                        it.category ==
-                            "WhatsApp"
-                    }
-
-                "Telegram" ->
-                    photos.filter {
-                        it.category ==
-                            "Telegram"
-                    }
-
-                else ->
-                    photos
-            }
-
-        LazyColumn(
-
-            modifier =
-                Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-
-            contentPadding =
-                PaddingValues(
-                    horizontal = 20.dp,
-                    vertical = 12.dp
-                ),
-
-            verticalArrangement =
-                Arrangement.spacedBy(16.dp)
-
-        ) {
-
-            item {
-
-                HeroCard(
-
-                    total =
-                        photos.size,
-
-                    screenshotSize =
-                        screenshotSize,
-
-                    onScan =
-                        onScan,
-
-                    isScanning =
-                        isScanning
-                )
-            }
-
-            item {
-
-                Row(
-
-                    modifier =
-                        Modifier.fillMaxWidth(),
-
-                    horizontalArrangement =
-                        Arrangement.spacedBy(10.dp)
-
+                Column(
+                    modifier = Modifier.weight(1f)
                 ) {
 
-                    StatCard(
-
-                        modifier =
-                            Modifier.weight(1f),
-
-                        icon =
-                            Icons.Default.Screenshot,
-
-                        value =
-                            screenshots.toString(),
-
-                        label =
-                            "Ekran görüntüsü"
+                    Text(
+                        text = photo.name,
+                        maxLines = 1,
+                        fontWeight = FontWeight.Bold
                     )
 
-                    StatCard(
+                    Spacer(Modifier.height(4.dp))
 
-                        modifier =
-                            Modifier.weight(1f),
-
-                        icon =
-                            Icons.Default.Storage,
-
-                        value =
-                            formatSize(
-                                screenshotSize
-                            ),
-
-                        label =
-                            "Kapladığı alan"
+                    Text(
+                        text = photo.category,
+                        color = Color.Gray
                     )
                 }
-            }
 
-            item {
-
-                Text(
-
-                    "Temizlik alanları",
-
-                    style =
-                        MaterialTheme.typography.titleLarge,
-
-                    fontWeight =
-                        FontWeight.Bold
-                )
-            }
-
-            item {
-
-                CategoryCard(
-
-                    title =
-                        "Ekran görüntüleri",
-
-                    subtitle =
-                        screenshots.toString() +
-                        " fotoğraf • " +
-                        formatSize(
-                            screenshotSize
-                        ),
-
-                    icon =
-                        Icons.Default.Screenshot,
-
-                    onClick = {
-                        onCategorySelected(
-                            "Ekran görüntüsü"
-                        )
-                    }
-                )
-            }
-
-            item {
-
-                CategoryCard(
-
-                    title =
-                        "WhatsApp",
-
-                    subtitle =
-                        whatsapp.toString() +
-                        " fotoğraf • " +
-                        formatSize(
-                            whatsappSize
-                        ),
-
-                    icon =
-                        Icons.Default.Image,
-
-                    onClick = {
-                        onCategorySelected(
-                            "WhatsApp"
-                        )
-                    }
-                )
-            }
-
-            item {
-
-                CategoryCard(
-
-                    title =
-                        "Telegram",
-
-                    subtitle =
-                        telegram.toString() +
-                        " fotoğraf",
-
-                    icon =
-                        Icons.Default.Image,
-
-                    onClick = {
-                        onCategorySelected(
-                            "Telegram"
-                        )
-                    }
-                )
-            }
-
-            item {
-
-                Text(
-
-                    "Fotoğraflar",
-
-                    style =
-                        MaterialTheme.typography.titleLarge,
-
-                    fontWeight =
-                        FontWeight.Bold
-                )
-            }
-
-            item {
-
-                Row(
-                    horizontalArrangement =
-                        Arrangement.spacedBy(8.dp)
-                ) {
-
-                    listOf(
-                        "Tümü",
-                        "Ekran görüntüsü",
-                        "WhatsApp",
-                        "Telegram"
-                    ).forEach { category ->
-
-                        FilterChip(
-
-                            selected =
-                                selectedCategory ==
-                                    category,
-
-                            onClick = {
-                                onCategorySelected(
-                                    category
-                                )
-                            },
-
-                            label = {
-
-                                Text(
-
-                                    if (
-                                        category ==
-                                        "Ekran görüntüsü"
-                                    ) {
-                                        "Ekran"
-                                    } else {
-                                        category
-                                    }
-                                )
-    
-                            }
-                        )
-                    }
+                if (selected) {
+                    Text(
+                        "✓",
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
